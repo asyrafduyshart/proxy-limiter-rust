@@ -9,43 +9,39 @@ use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::sync::{Mutex, OnceLock};
 
-// JWT claim
-// #[derive(Debug, Deserialize)]
-// struct Claims {
-//     sub: String,
-//     exp: usize,
-// }
 #[derive(Hash, Eq, PartialEq, Debug, Clone)]
-struct Rustacean {
-    name: String,
-    country: String,
+struct TokenHash {
+    sub: String,
+    path: String,
+    method: String,
 }
-impl Rustacean {
-    fn new(name: &str, country: &str) -> Self {
-        Rustacean {
-            name: name.to_string(),
-            country: country.to_string(),
+impl TokenHash {
+    fn new(sub: &str, path: &str, method: &str) -> Self {
+        TokenHash {
+            sub: sub.to_string(),
+            path: path.to_string(),
+            method: method.to_string(),
         }
     }
 }
 
-// static RATE_LIMITERS: OnceLock<
-//     Mutex<HashMap<String, RateLimiter<NotKeyed, InMemoryState, QuantaClock>>>,
-// > = OnceLock::new();
-
 static RATE_LIMITERS: OnceLock<
-    Mutex<HashMap<String, RateLimiter<Rustacean, DashMapStateStore<Rustacean>, QuantaClock>>>,
+    Mutex<HashMap<String, RateLimiter<TokenHash, DashMapStateStore<TokenHash>, QuantaClock>>>,
 > = OnceLock::new();
 
 // Create a rate limiter for a given user
-fn check_limiter_for_user(sub: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn check_limiter_for_user(
+    sub: &str,
+    path: &str,
+    method: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let limiters = RATE_LIMITERS.get_or_init(|| Mutex::new(HashMap::new()));
     let mut limiters = limiters.lock().unwrap();
     let limiter = limiters.get(sub);
     match limiter {
         Some(limiter) => {
             // return limiter found
-            let key = Rustacean::new("hello", "mama");
+            let key = TokenHash::new(sub, path, method);
             // limiter.shrink_to_fit();
             match limiter.check_key(&key) {
                 Ok(()) => {
@@ -60,7 +56,7 @@ fn check_limiter_for_user(sub: &str) -> Result<(), Box<dyn std::error::Error>> {
             // return error limiter not found
             let quota = Quota::per_minute(NonZeroU32::new(5).unwrap());
             let clock = QuantaClock::default();
-            let keyed: RateLimiter<Rustacean, DashMapStateStore<Rustacean>, QuantaClock> =
+            let keyed: RateLimiter<TokenHash, DashMapStateStore<TokenHash>, QuantaClock> =
                 RateLimiter::dashmap_with_clock(quota, &clock);
 
             limiters.insert(sub.to_owned(), keyed);
@@ -106,11 +102,11 @@ async fn proxy(req: HttpRequest, body: web::Bytes) -> HttpResponse {
     });
 
     // Check if the token is present
-    let sub = match token {
+    match token {
         Some(token) => {
             let tkn = decode_jwt_and_get_sub(token);
             match tkn {
-                Some(tkn) => match check_limiter_for_user(&tkn) {
+                Some(tkn) => match check_limiter_for_user(&tkn, &path, &req.method().to_string()) {
                     Ok(()) => tkn,
                     Err(_e) => {
                         return HttpResponse::TooManyRequests().finish();
@@ -133,7 +129,7 @@ async fn proxy(req: HttpRequest, body: web::Bytes) -> HttpResponse {
 async fn main() -> std::io::Result<()> {
     HttpServer::new(|| {
         App::new().wrap(middleware::Logger::default()).service(
-            web::resource("/proxy")
+            web::resource("/{tail:.*}")
                 .route(web::get().to(proxy))
                 .route(web::post().to(proxy))
                 .route(web::put().to(proxy))

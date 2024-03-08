@@ -9,17 +9,6 @@ pub async fn forward(
     app_data: web::Data<AppData>,
 ) -> Result<HttpResponse, Error> {
     let client = app_data.client.clone();
-    // get Authroization header
-    // match req.extensions().get::<Value>() {
-    //     Some(val) => {
-    //         println!("Auth header: {:?}", val.get("sub").unwrap());
-    //     }
-    //     None => {
-    //         println!("No auth header");
-    //     }
-    // }
-
-    // let host = req.headers().get("host").unwrap().to_str().unwrap();
     let mut new_url = Url::parse(&format!("http://{}", "httpbin.org")).unwrap();
     new_url.set_path(req.uri().path());
     new_url.set_query(req.uri().query());

@@ -1,18 +1,27 @@
+use route_recognizer::Match;
+use route_recognizer::Router;
+
 use std::{
     collections::HashMap,
     future::{ready, Ready},
+    hash::Hash,
     num::NonZeroU32,
     sync::{Mutex, OnceLock},
 };
 
 use actix_web::{
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
-    Error, HttpMessage, HttpResponse,
+    Error, HttpMessage,
 };
 use awc::body::EitherBody;
 use futures_util::{future::LocalBoxFuture, FutureExt, TryFutureExt};
 use governor::{clock::QuantaClock, state::keyed::DashMapStateStore, Quota, RateLimiter};
 use serde_json::Value;
+
+use crate::domain::{
+    self,
+    config::{Limiter, ROUTE_LIMITER},
+};
 
 #[derive(Hash, Eq, PartialEq, Debug, Clone)]
 pub struct TokenHash {
@@ -34,12 +43,16 @@ impl TokenHash {
 //    next service in chain as parameter.
 // 2. Middleware's call method gets called with normal request.
 pub struct RequestLimiter {
-    pub rate: u32,
+    pub config: domain::config::Config,
+    pub router: Router<HashMap<String, Limiter>>,
 }
 
 impl RequestLimiter {
-    pub fn new(rate: u32) -> Self {
-        RequestLimiter { rate }
+    pub fn new(config: domain::config::Config) -> Self {
+        RequestLimiter {
+            config: config.clone(),
+            router: config.router(),
+        }
     }
 }
 
@@ -47,37 +60,63 @@ static RATE_LIMITERS: OnceLock<
     Mutex<HashMap<String, RateLimiter<TokenHash, DashMapStateStore<TokenHash>, QuantaClock>>>,
 > = OnceLock::new();
 
-pub fn check_limiter_for_user(
-    sub: &str,
-    path: &str,
-    method: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let limiters = RATE_LIMITERS.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut limiters = limiters.lock().unwrap();
-    let limiter = limiters.get(sub);
-    match limiter {
-        Some(limiter) => {
-            // return limiter found
-            let key = TokenHash::new(sub, path, method);
-            // limiter.shrink_to_fit();
-            match limiter.check_key(&key) {
-                Ok(()) => return Ok(()),
-                Err(_) => {
-                    return Err("Rate limit exceeded".into());
+struct GlobalLimiter {
+    token: TokenHash,
+}
+impl GlobalLimiter {
+    fn new(token: TokenHash) -> Self {
+        GlobalLimiter { token }
+    }
+    fn check(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let limiters = RATE_LIMITERS.get_or_init(|| Mutex::new(HashMap::new()));
+        let _config = domain::config::GLOBAL_CONFIG.get().unwrap();
+        let routes = ROUTE_LIMITER.get().unwrap();
+        let mut limiters = limiters.lock().unwrap();
+
+        // set to global limiter
+
+        let route_finder: Result<Match<&HashMap<String, Limiter>>, _> =
+            routes.recognize(&self.token.path);
+        match route_finder {
+            // set type to Match<&HashMap<String, Limiter>>
+            Ok(res) => {
+                let data: &HashMap<String, Limiter> = res.handler();
+                // loop through data
+                let res = data.get(&self.token.method);
+                match res {
+                    Some(limiter) => {
+                        println!("limiter found {:?}", limiter);
+                    }
+                    None => println!("Method not found"),
                 }
             }
+            Err(_) => println!("Route not found"),
         }
-        None => {
-            // return error limiter not found
-            let quota = Quota::per_minute(NonZeroU32::new(5).unwrap());
-            let clock = QuantaClock::default();
-            let keyed: RateLimiter<TokenHash, DashMapStateStore<TokenHash>, QuantaClock> =
-                RateLimiter::dashmap_with_clock(quota, &clock);
 
-            limiters.insert(sub.to_owned(), keyed);
-            return Ok(());
-        }
-    };
+        let limiter = limiters.get(&self.token.path);
+        match limiter {
+            Some(limiter) => {
+                // return limiter found
+                // limiter.shrink_to_fit();
+                match limiter.check_key(&self.token) {
+                    Ok(()) => return Ok(()),
+                    Err(_) => {
+                        return Err("Rate limit exceeded".into());
+                    }
+                }
+            }
+            None => {
+                // return error limiter not found
+                let quota = Quota::per_minute(NonZeroU32::new(5).unwrap());
+                let clock = QuantaClock::default();
+                let keyed: RateLimiter<TokenHash, DashMapStateStore<TokenHash>, QuantaClock> =
+                    RateLimiter::dashmap_with_clock(quota, &clock);
+
+                limiters.insert(self.token.path.clone(), keyed);
+                return Ok(());
+            }
+        };
+    }
 }
 
 // Middleware factory is `Transform` trait
@@ -101,7 +140,7 @@ where
 }
 
 pub struct RequestLimiterMiddleware<S> {
-    service: S,
+    pub service: S,
 }
 
 impl<S, B> Service<ServiceRequest> for RequestLimiterMiddleware<S>
@@ -124,20 +163,23 @@ where
             None => "".to_string(),
         };
 
-        // generate token hash
-        match check_limiter_for_user(&sub, &path, &method) {
-            Ok(_) => self
-                .service
-                .call(req)
-                .map_ok(ServiceResponse::map_into_left_body)
-                .boxed_local(),
-            Err(_e) => Box::pin(async {
-                Ok(req.into_response(
-                    HttpResponse::TooManyRequests()
-                        .finish()
-                        .map_into_right_body(),
-                ))
-            }),
+        match GlobalLimiter::new(TokenHash::new(&sub, &path, &method)).check() {
+            Ok(_) => {
+                return self
+                    .service
+                    .call(req)
+                    .map_ok(ServiceResponse::map_into_left_body)
+                    .boxed_local();
+            }
+            Err(_e) => {
+                return Box::pin(async {
+                    Ok(req.into_response(
+                        actix_web::HttpResponse::TooManyRequests()
+                            .finish()
+                            .map_into_right_body(),
+                    ))
+                });
+            }
         }
     }
 }

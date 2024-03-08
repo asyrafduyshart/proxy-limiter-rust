@@ -18,3 +18,5 @@ Cargo.toml.orig
 # Added by cargo
 
 /target
+
+config.json

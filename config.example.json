@@ -1,0 +1,75 @@
+{
+    "port": 8090,
+    "proxy": "http://httpbin.org",
+    "timeout": 10000,
+    "global_limiter": {
+        "max": 100,
+        "duration": 60,
+        "jwt_validation": {
+            "validate": false,
+            "params": ["sub"]
+        }
+    },
+    "limiters": {
+        "/data/*": {
+            "GET": {
+                "max": 5,
+                "duration": 60,
+                "jwt_validation": {
+                    "validate": true,
+                    "params": ["sub"]
+                }
+            },
+            "POST": {
+                "max": 10,
+                "duration": 60,
+                "jwt_validation": {
+                    "validate": true,
+                    "params": ["sub"]
+                }
+            },
+            "PUT": {
+                "max": 10,
+                "duration": 60,
+                "jwt_validation": {
+                    "validate": true,
+                    "params": ["sub"]
+                }
+            },
+            "DELETE": {
+                "max": 10,
+                "duration": 60,
+                "jwt_validation": {
+                    "validate": true,
+                    "params": ["sub"]
+                }
+            },
+            "PATCH": {
+                "max": 10,
+                "duration": 60,
+                "jwt_validation": {
+                    "validate": true,
+                    "params": ["sub"]
+                }
+            },
+            "OPTIONS": {
+                "max": 10,
+                "duration": 60,
+                "jwt_validation": {
+                    "validate": true,
+                    "params": ["sub"]
+                }
+            }
+        },
+        "/data2": {
+            "POST": {
+                "max": 10,
+                "duration": 60,
+                "jwt_validation": {
+                    "validate": true,
+                    "params": ["sub"]
+                }
+            }
+        }
+    }
+}

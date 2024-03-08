@@ -10,8 +10,13 @@ actix-service = "2.0.2"
 actix-web = { version = "4.5.1", features = ["rustls"]}
 awc = "3.4.0"
 base64 = "0.22.0"
+dotenv = "0.15.0"
+env_logger = "0.11.3"
 futures = "0.3.30"
 futures-util = "0.3.30"
 governor = "0.6.3"
+log = "0.4.21"
+route-recognizer = "0.3.1"
+serde = { version = "1.0.197", features = ["derive"]}
 serde_json = "1.0.114"
 url = "2.5.0"

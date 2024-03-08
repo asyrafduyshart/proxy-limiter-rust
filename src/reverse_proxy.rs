@@ -1,5 +1,4 @@
-use actix_web::{error, web, Error, HttpMessage, HttpRequest, HttpResponse};
-use serde_json::Value;
+use actix_web::{error, web, Error, HttpRequest, HttpResponse};
 use url::Url;
 
 use crate::AppData;

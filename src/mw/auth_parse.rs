@@ -5,9 +5,13 @@ use actix_web::{
     Error, HttpMessage, HttpResponse,
 };
 use awc::body::EitherBody;
+use base64::{
+    alphabet,
+    engine::{self, general_purpose},
+    Engine as _,
+};
 use futures_util::{future::LocalBoxFuture, FutureExt, TryFutureExt};
-
-use crate::limiter::decode_jwt_and_get_sub;
+use serde_json::Value;
 
 // There are two steps in middleware processing.
 // 1. Middleware initialization, middleware factory gets called with
@@ -37,6 +41,25 @@ where
 
 pub struct CheckAuthMiddleware<S> {
     service: S,
+}
+
+// Function to decode JWT and extract the `sub` claim without validation
+fn decode_jwt_and_get_sub(token: &str) -> Option<Value> {
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+
+    let payload = parts[1];
+
+    let decoded = engine::GeneralPurpose::new(&alphabet::URL_SAFE, general_purpose::NO_PAD)
+        .decode(payload.as_bytes())
+        .unwrap();
+
+    let payload_json: Value = serde_json::from_slice(&decoded).ok()?;
+
+    // return Value payload
+    Some(payload_json)
 }
 
 impl<S, B> Service<ServiceRequest> for CheckAuthMiddleware<S>

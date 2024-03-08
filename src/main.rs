@@ -1,6 +1,5 @@
 use actix_web::{web, App, HttpServer};
 use awc::Client;
-mod limiter;
 mod mw;
 mod reverse_proxy;
 

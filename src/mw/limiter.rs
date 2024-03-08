@@ -77,6 +77,7 @@ impl GlobalLimiter {
 
         let route_finder: Result<Match<&HashMap<String, Limiter>>, _> =
             routes.recognize(&self.token.path);
+
         match route_finder {
             // set type to Match<&HashMap<String, Limiter>>
             Ok(res) => {

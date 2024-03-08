@@ -65,7 +65,7 @@ pub fn check_limiter_for_user(
 }
 
 // Function to decode JWT and extract the `sub` claim without validation
-pub fn decode_jwt_and_get_sub(token: &str) -> Option<String> {
+pub fn decode_jwt_and_get_sub(token: &str) -> Option<Value> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
         return None;
@@ -79,8 +79,6 @@ pub fn decode_jwt_and_get_sub(token: &str) -> Option<String> {
 
     let payload_json: Value = serde_json::from_slice(&decoded).ok()?;
 
-    payload_json
-        .get("sub")
-        .and_then(|sub| sub.as_str())
-        .map(|s| s.to_owned())
+    // return Value payload
+    Some(payload_json)
 }

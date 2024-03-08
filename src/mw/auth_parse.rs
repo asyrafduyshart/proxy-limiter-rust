@@ -2,10 +2,12 @@ use std::future::{ready, Ready};
 
 use actix_web::{
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
-    Error, HttpResponse,
+    Error, HttpMessage, HttpResponse,
 };
 use awc::body::EitherBody;
 use futures_util::{future::LocalBoxFuture, FutureExt, TryFutureExt};
+
+use crate::limiter::decode_jwt_and_get_sub;
 
 // There are two steps in middleware processing.
 // 1. Middleware initialization, middleware factory gets called with
@@ -50,16 +52,36 @@ where
     forward_ready!(service);
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
-        // check if Authorization header is present
-        if req.headers().contains_key("Authorization") {
-            self.service
-                .call(req)
-                .map_ok(ServiceResponse::map_into_left_body)
-                .boxed_local()
-        } else {
-            Box::pin(async {
-                Ok(req.into_response(HttpResponse::Unauthorized().finish().map_into_right_body()))
+        match req.headers().get("Authorization").and_then(|value| {
+            value.to_str().ok().and_then(|value| {
+                let parts: Vec<&str> = value.split_whitespace().collect();
+                if parts.len() == 2 && parts[0] == "Bearer" {
+                    Some(parts[1])
+                } else {
+                    None
+                }
             })
+        }) {
+            Some(token) => {
+                let jwt_value = decode_jwt_and_get_sub(token);
+                match jwt_value {
+                    Some(jwt_value) => {
+                        req.extensions_mut().insert(jwt_value);
+                        self.service
+                            .call(req)
+                            .map_ok(ServiceResponse::map_into_left_body)
+                            .boxed_local()
+                    }
+                    None => Box::pin(async {
+                        Ok(req.into_response(
+                            HttpResponse::Unauthorized().finish().map_into_right_body(),
+                        ))
+                    }),
+                }
+            }
+            None => Box::pin(async {
+                Ok(req.into_response(HttpResponse::Unauthorized().finish().map_into_right_body()))
+            }),
         }
     }
 }

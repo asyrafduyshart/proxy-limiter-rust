@@ -25,19 +25,20 @@ use crate::domain::{
 
 #[derive(Hash, Eq, PartialEq, Debug, Clone)]
 pub struct TokenHash {
-    sub: String,
+    code: String,
     path: String,
     method: String,
 }
 impl TokenHash {
-    fn new(sub: &str, path: &str, method: &str) -> Self {
+    fn new(code: &str, path: &str, method: &str) -> Self {
         TokenHash {
-            sub: sub.to_string(),
+            code: code.to_string(),
             path: path.to_string(),
             method: method.to_string(),
         }
     }
 }
+
 // There are two steps in middleware processing.
 // 1. Middleware initialization, middleware factory gets called with
 //    next service in chain as parameter.
@@ -61,32 +62,60 @@ static RATE_LIMITERS: OnceLock<
 > = OnceLock::new();
 
 struct GlobalLimiter {
-    token: TokenHash,
+    path: String,
+    method: String,
+    info: Option<Value>,
 }
 impl GlobalLimiter {
-    fn new(token: TokenHash) -> Self {
-        GlobalLimiter { token }
+    fn new(path: String, method: String, info: Option<Value>) -> Self {
+        GlobalLimiter { path, method, info }
     }
     fn check(&self) -> Result<(), Box<dyn std::error::Error>> {
         let limiters = RATE_LIMITERS.get_or_init(|| Mutex::new(HashMap::new()));
-        let _config = domain::config::GLOBAL_CONFIG.get().unwrap();
+        let config = domain::config::GLOBAL_CONFIG.get().unwrap();
         let routes = ROUTE_LIMITER.get().unwrap();
         let mut limiters = limiters.lock().unwrap();
 
-        // set to global limiter
-
         let route_finder: Result<Match<&HashMap<String, Limiter>>, _> =
-            routes.recognize(&self.token.path);
+            routes.recognize(&self.path);
+
+        let mut limited_path_code = config.global_limiter.code.clone();
+        let mut prefix_code = config.global_limiter.code.clone();
+        let mut main_limiter = config.global_limiter.clone();
 
         match route_finder {
             // set type to Match<&HashMap<String, Limiter>>
             Ok(res) => {
                 let data: &HashMap<String, Limiter> = res.handler();
                 // loop through data
-                let res = data.get(&self.token.method);
+                let res = data.get(&self.method);
                 match res {
                     Some(limiter) => {
-                        println!("limiter found {:?}", limiter);
+                        main_limiter = limiter.clone();
+                        // println!("Limiter found: {:?}", limiter);
+                        limited_path_code = limiter.code.clone();
+                        match &self.info {
+                            Some(info) => {
+                                // join all data sub from limiter into one string
+                                let set = limiter.jwt_validation.params.concat();
+                                // check if info contains all set or set default to string
+                                match info.get(&set) {
+                                    Some(val) => {
+                                        prefix_code = val.as_str().unwrap().to_string();
+                                    }
+                                    None => {}
+                                }
+                            }
+                            None => {
+                                prefix_code = config.global_limiter.code.clone();
+                            }
+                        }
+                        // limited_path = limiter.max
+                        // check sub if need jwt validation and sub is not empty string
+                        // if limiter.jwt_validation.validate {
+                        //     // return error if jwt validation failed
+                        //     return Err("JWT_VALIDATION_FAILED".into());
+                        // }
                     }
                     None => println!("Method not found"),
                 }
@@ -94,26 +123,28 @@ impl GlobalLimiter {
             Err(_) => println!("Route not found"),
         }
 
-        let limiter = limiters.get(&self.token.path);
+        let limiter = limiters.get(&limited_path_code);
+
+        // token global limiter
+        let token = TokenHash::new(&prefix_code, &self.path, &self.method);
         match limiter {
-            Some(limiter) => {
-                // return limiter found
-                // limiter.shrink_to_fit();
-                match limiter.check_key(&self.token) {
-                    Ok(()) => return Ok(()),
-                    Err(_) => {
-                        return Err("Rate limit exceeded".into());
-                    }
+            Some(limiter) => match limiter.check_key(&token) {
+                Ok(()) => return Ok(()),
+                Err(_) => {
+                    return Err("RATE_LIMIT_EXCEEDED".into());
                 }
-            }
+            },
             None => {
                 // return error limiter not found
-                let quota = Quota::per_minute(NonZeroU32::new(5).unwrap());
+                let quota =
+                    Quota::with_period(std::time::Duration::from_secs(main_limiter.duration))
+                        .unwrap()
+                        .allow_burst(NonZeroU32::new(main_limiter.max).unwrap());
                 let clock = QuantaClock::default();
                 let keyed: RateLimiter<TokenHash, DashMapStateStore<TokenHash>, QuantaClock> =
                     RateLimiter::dashmap_with_clock(quota, &clock);
 
-                limiters.insert(self.token.path.clone(), keyed);
+                limiters.insert(limited_path_code, keyed);
                 return Ok(());
             }
         };
@@ -157,14 +188,11 @@ where
     forward_ready!(service);
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
-        let path = req.path().to_string();
+        let path: String = req.path().to_string();
         let method = req.method().to_string();
-        let sub = match req.extensions().get::<Value>() {
-            Some(val) => val.get("sub").unwrap().to_string(),
-            None => "".to_string(),
-        };
+        let code = req.extensions().get::<Value>().cloned();
 
-        match GlobalLimiter::new(TokenHash::new(&sub, &path, &method)).check() {
+        match GlobalLimiter::new(path.clone(), method.clone(), code).check() {
             Ok(_) => {
                 return self
                     .service

@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine as _};
 use route_recognizer::Router;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::OnceLock};
@@ -19,7 +20,21 @@ impl Config {
     pub fn router(&self) -> Router<HashMap<String, Limiter>> {
         let mut router: Router<HashMap<String, Limiter>> = Router::new();
         for (path, hash) in self.limiters.iter() {
-            router.add(path, hash.clone());
+            // path into all Limiter HashMap
+            let mut new_hash: HashMap<String, Limiter> = HashMap::new();
+            for (method, limiter) in hash.iter() {
+                let code = STANDARD_NO_PAD.encode(format!("{:?}{:?}", path, method));
+                new_hash.insert(
+                    method.clone(),
+                    Limiter::new(
+                        Some(code),
+                        limiter.max,
+                        limiter.duration,
+                        limiter.jwt_validation.clone(),
+                    ),
+                );
+            }
+            router.add(path, new_hash);
         }
         // get or init
         ROUTE_LIMITER.get_or_init(|| router.clone());
@@ -29,11 +44,33 @@ impl Config {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Limiter {
-    pub max: u64,
+    // default to global string
+    #[serde(default = "default_code")]
+    pub code: String,
+    pub max: u32,
     pub duration: u64,
     pub jwt_validation: JwtValidation,
 }
 
+fn default_code() -> String {
+    String::from("global")
+}
+impl Limiter {
+    pub fn new(
+        code: Option<String>,
+        max: u32,
+        duration: u64,
+        jwt_validation: JwtValidation,
+    ) -> Self {
+        Limiter {
+            // set code to global from
+            code: code.ok_or("global").unwrap(),
+            max,
+            duration,
+            jwt_validation,
+        }
+    }
+}
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct JwtValidation {
     pub validate: bool,

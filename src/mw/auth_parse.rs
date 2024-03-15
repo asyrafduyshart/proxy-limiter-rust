@@ -2,15 +2,14 @@ use std::future::{ready, Ready};
 
 use actix_web::{
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
-    Error, HttpMessage, HttpResponse,
+    Error, HttpMessage,
 };
-use awc::body::EitherBody;
 use base64::{
     alphabet,
     engine::{self, general_purpose},
     Engine as _,
 };
-use futures_util::{future::LocalBoxFuture, FutureExt, TryFutureExt};
+use futures_util::{future::LocalBoxFuture, FutureExt};
 use serde_json::Value;
 
 // There are two steps in middleware processing.
@@ -28,7 +27,7 @@ where
     S::Future: 'static,
     B: 'static,
 {
-    type Response = ServiceResponse<EitherBody<B>>;
+    type Response = ServiceResponse<B>;
     type Error = Error;
     type InitError = ();
     type Transform = CheckAuthMiddleware<S>;
@@ -68,7 +67,7 @@ where
     S::Future: 'static,
     B: 'static,
 {
-    type Response = ServiceResponse<EitherBody<B>>;
+    type Response = ServiceResponse<B>;
     type Error = Error;
     type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -90,21 +89,13 @@ where
                 match jwt_value {
                     Some(jwt_value) => {
                         req.extensions_mut().insert(jwt_value);
-                        self.service
-                            .call(req)
-                            .map_ok(ServiceResponse::map_into_left_body)
-                            .boxed_local()
                     }
-                    None => Box::pin(async {
-                        Ok(req.into_response(
-                            HttpResponse::Unauthorized().finish().map_into_right_body(),
-                        ))
-                    }),
+                    None => (),
                 }
             }
-            None => Box::pin(async {
-                Ok(req.into_response(HttpResponse::Unauthorized().finish().map_into_right_body()))
-            }),
+            None => (),
         }
+
+        self.service.call(req).boxed_local()
     }
 }

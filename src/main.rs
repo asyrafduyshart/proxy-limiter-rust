@@ -54,6 +54,9 @@ async fn main() -> std::io::Result<()> {
     config.router();
     GLOBAL_CONFIG.set(config.clone()).unwrap();
 
+    // get env port
+    let port = env::var("PORT").unwrap_or_else(|_| config.port.to_string());
+
     HttpServer::new(move || {
         App::new()
             .wrap(actix_web::middleware::Logger::default())
@@ -65,7 +68,7 @@ async fn main() -> std::io::Result<()> {
             )))
             .default_service(web::route().to(reverse_proxy::forward))
     })
-    .bind("127.0.0.1:9080")?
+    .bind(format!("0.0.0.0:{}", port))?
     .run()
     .await
 }

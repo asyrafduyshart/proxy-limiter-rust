@@ -64,11 +64,17 @@ static RATE_LIMITERS: OnceLock<
 struct GlobalLimiter {
     path: String,
     method: String,
+    ipv4: Option<String>,
     info: Option<Value>,
 }
 impl GlobalLimiter {
-    fn new(path: String, method: String, info: Option<Value>) -> Self {
-        GlobalLimiter { path, method, info }
+    fn new(path: String, method: String, ipv4: Option<String>, info: Option<Value>) -> Self {
+        GlobalLimiter {
+            path,
+            method,
+            ipv4,
+            info,
+        }
     }
     fn check(&self) -> Result<(), Box<dyn std::error::Error>> {
         let limiters = RATE_LIMITERS.get_or_init(|| Mutex::new(HashMap::new()));
@@ -92,44 +98,42 @@ impl GlobalLimiter {
                 match res {
                     Some(limiter) => {
                         main_limiter = limiter.clone();
-                        // println!("Limiter found: {:?}", limiter);
                         limited_path_code = limiter.code.clone();
-                        match &self.info {
-                            Some(info) => {
-                                // join all data sub from limiter into one string
-                                let set = limiter.jwt_validation.params.concat();
-                                // check if info contains all set or set default to string
-                                match info.get(&set) {
-                                    Some(val) => {
-                                        prefix_code = val.as_str().unwrap().to_string();
-                                    }
-                                    None => {}
-                                }
-                            }
-                            None => {
-                                prefix_code = config.global_limiter.code.clone();
-                            }
-                        }
-                        // limited_path = limiter.max
-                        // check sub if need jwt validation and sub is not empty string
-                        // if limiter.jwt_validation.validate {
-                        //     // return error if jwt validation failed
-                        //     return Err("JWT_VALIDATION_FAILED".into());
-                        // }
                     }
                     None => println!("Method not found"),
                 }
             }
-            Err(_) => println!("Route not found"),
+            Err(_) => {}
+        }
+
+        match &self.info {
+            Some(info) => {
+                // join all data sub from limiter into one string
+                let set = main_limiter.jwt_validation.params.concat();
+                // check if info contains all set or set default to string
+                match info.get(&set) {
+                    Some(val) => {
+                        prefix_code = val.as_str().unwrap().to_string();
+                    }
+                    None => {}
+                }
+            }
+            None => {
+                // set ipv4 to prefix_code
+                prefix_code = self.ipv4.clone().unwrap_or_else(|| "not_found".to_string());
+            }
         }
 
         let limiter = limiters.get(&limited_path_code);
-
-        // token global limiter
         let token = TokenHash::new(&prefix_code, &self.path, &self.method);
+
         match limiter {
             Some(limiter) => match limiter.check_key(&token) {
-                Ok(()) => return Ok(()),
+                Ok(()) => {
+                    // limiter len
+                    // println!("limiter len: {:?}", limiter.len());
+                    return Ok(());
+                }
                 Err(_) => {
                     return Err("RATE_LIMIT_EXCEEDED".into());
                 }
@@ -191,8 +195,13 @@ where
         let path: String = req.path().to_string();
         let method = req.method().to_string();
         let code = req.extensions().get::<Value>().cloned();
+        // get ip address
+        let ipv4 = req
+            .connection_info()
+            .realip_remote_addr()
+            .map(|ip| ip.to_string());
 
-        match GlobalLimiter::new(path.clone(), method.clone(), code).check() {
+        match GlobalLimiter::new(path.clone(), method.clone(), ipv4, code).check() {
             Ok(_) => {
                 return self
                     .service

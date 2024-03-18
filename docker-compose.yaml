@@ -1,0 +1,13 @@
+version: "3.8"
+services:
+  app:
+    container_name: proxy-limiter-rust
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./config.json:/proxy/config.json
+    environment:
+      - CONFIG_SETTING={"port":9080,"proxy":"http://httpbin.org","timeout":10000,"global_limiter":{"max":3,"duration":15,"jwt_validation":{"validate":false,"params":["sub"]}},"limiters":{"/post/*":{"GET":{"max":5,"duration":60,"jwt_validation":{"validate":true,"params":["sub"]}},"POST":{"max":2,"duration":60,"jwt_validation":{"validate":true,"params":["sub"]}},"PUT":{"max":10,"duration":60,"jwt_validation":{"validate":true,"params":["sub"]}},"DELETE":{"max":10,"duration":60,"jwt_validation":{"validate":true,"params":["sub"]}},"PATCH":{"max":10,"duration":60,"jwt_validation":{"validate":true,"params":["sub"]}},"OPTIONS":{"max":10,"duration":60,"jwt_validation":{"validate":true,"params":["sub"]}}},"/data2":{"POST":{"max":10,"duration":60,"jwt_validation":{"validate":true,"params":["sub"]}}}}}
+    ports:
+      - "9080:9080"

@@ -60,7 +60,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .wrap(actix_web::middleware::Logger::default())
-            .wrap(mw::limiter::RequestLimiter::new(config.clone()))
+            .wrap(mw::limiter::RequestLimiter)
             .wrap(mw::auth_parse::CheckAuth)
             .app_data(web::Data::new(AppData::new(
                 Client::default(),

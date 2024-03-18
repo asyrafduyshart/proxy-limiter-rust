@@ -9,7 +9,8 @@ pub async fn forward(
     app_data: web::Data<AppData>,
 ) -> Result<HttpResponse, Error> {
     let client = app_data.client.clone();
-    let mut new_url = Url::parse(&format!("http://{}", "httpbin.org")).unwrap();
+    let config = app_data.config.clone();
+    let mut new_url = Url::parse(config.proxy.as_str()).unwrap();
     new_url.set_path(req.uri().path());
     new_url.set_query(req.uri().query());
 

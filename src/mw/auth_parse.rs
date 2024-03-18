@@ -74,8 +74,11 @@ where
     forward_ready!(service);
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
-        match req.headers().get("Authorization").and_then(|value| {
-            value.to_str().ok().and_then(|value| {
+        if let Some(token) = req
+            .headers()
+            .get("Authorization")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| {
                 let parts: Vec<&str> = value.split_whitespace().collect();
                 if parts.len() == 2 && parts[0] == "Bearer" {
                     Some(parts[1])
@@ -83,17 +86,10 @@ where
                     None
                 }
             })
-        }) {
-            Some(token) => {
-                let jwt_value = decode_jwt_and_get_sub(token);
-                match jwt_value {
-                    Some(jwt_value) => {
-                        req.extensions_mut().insert(jwt_value);
-                    }
-                    None => (),
-                }
+        {
+            if let Some(jwt_value) = decode_jwt_and_get_sub(token) {
+                req.extensions_mut().insert(jwt_value);
             }
-            None => (),
         }
 
         self.service.call(req).boxed_local()

@@ -1,5 +1,4 @@
 use route_recognizer::Match;
-use route_recognizer::Router;
 
 use std::{
     collections::HashMap,
@@ -39,23 +38,7 @@ impl TokenHash {
     }
 }
 
-// There are two steps in middleware processing.
-// 1. Middleware initialization, middleware factory gets called with
-//    next service in chain as parameter.
-// 2. Middleware's call method gets called with normal request.
-pub struct RequestLimiter {
-    pub config: domain::config::Config,
-    pub router: Router<HashMap<String, Limiter>>,
-}
-
-impl RequestLimiter {
-    pub fn new(config: domain::config::Config) -> Self {
-        RequestLimiter {
-            config: config.clone(),
-            router: config.router(),
-        }
-    }
-}
+pub struct RequestLimiter;
 
 static RATE_LIMITERS: OnceLock<
     Mutex<HashMap<String, RateLimiter<TokenHash, DashMapStateStore<TokenHash>, QuantaClock>>>,
@@ -67,7 +50,21 @@ struct GlobalLimiter {
     ipv4: Option<String>,
     info: Option<Value>,
 }
+
+/// Implementation of the GlobalLimiter struct.
 impl GlobalLimiter {
+    /// Creates a new instance of GlobalLimiter.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - A String representing the path of the limiter.
+    /// * `method` - A String representing the HTTP method of the limiter.
+    /// * `ipv4` - An optional String representing the IPv4 address.
+    /// * `info` - An optional Value representing additional information.
+    ///
+    /// # Returns
+    ///
+    /// A new instance of GlobalLimiter.
     fn new(path: String, method: String, ipv4: Option<String>, info: Option<Value>) -> Self {
         GlobalLimiter {
             path,
@@ -76,88 +73,81 @@ impl GlobalLimiter {
             info,
         }
     }
+
+    /// Checks if the limiter is within the rate limits.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(())` if the limiter is within the rate limits.
+    /// - `Err(Box<dyn std::error::Error>)` if the rate limit is exceeded.
     fn check(&self) -> Result<(), Box<dyn std::error::Error>> {
+        // Get the global rate limiters
         let limiters = RATE_LIMITERS.get_or_init(|| Mutex::new(HashMap::new()));
+        // Get the global configuration
         let config = domain::config::GLOBAL_CONFIG.get().unwrap();
+        // Get the route limiters
         let routes = ROUTE_LIMITER.get().unwrap();
+        // Lock the limiters
         let mut limiters = limiters.lock().unwrap();
 
+        // Find the limiter for the given route
         let route_finder: Result<Match<&HashMap<String, Limiter>>, _> =
             routes.recognize(&self.path);
 
+        // Initialize variables for the limiter codes
         let mut limited_path_code = config.global_limiter.code.clone();
         let mut prefix_code = config.global_limiter.code.clone();
         let mut main_limiter = config.global_limiter.clone();
 
-        match route_finder {
-            // set type to Match<&HashMap<String, Limiter>>
-            Ok(res) => {
-                let data: &HashMap<String, Limiter> = res.handler();
-                // loop through data
-                let res = data.get(&self.method);
-                match res {
-                    Some(limiter) => {
-                        main_limiter = limiter.clone();
-                        limited_path_code = limiter.code.clone();
-                    }
-                    None => println!("Method not found"),
-                }
-            }
-            Err(_) => {}
-        }
-
-        match &self.info {
-            Some(info) => {
-                // join all data sub from limiter into one string
-                let set = main_limiter.jwt_validation.params.concat();
-                // check if info contains all set or set default to string
-                match info.get(&set) {
-                    Some(val) => {
-                        prefix_code = val.as_str().unwrap().to_string();
-                    }
-                    None => {}
-                }
-            }
-            None => {
-                // set ipv4 to prefix_code
-                prefix_code = self.ipv4.clone().unwrap_or_else(|| "not_found".to_string());
+        // Check if the route limiter is found
+        if let Ok(res) = route_finder {
+            let data: &HashMap<String, Limiter> = res.handler();
+            if let Some(limiter) = data.get(&self.method) {
+                main_limiter = limiter.clone();
+                limited_path_code = limiter.code.clone();
             }
         }
 
+        // Check if additional information is provided
+        if let Some(info) = &self.info {
+            let set = main_limiter.jwt_validation.params.concat();
+            if let Some(val) = info.get(&set) {
+                prefix_code = val.as_str().unwrap().to_string();
+            }
+        } else {
+            prefix_code = self.ipv4.clone().unwrap_or_else(|| "not_found".to_string());
+        }
+
+        // Get the limiter for the limited path code
         let limiter = limiters.get(&limited_path_code);
+        // Create a token for rate limiting
         let token = TokenHash::new(&prefix_code, &self.path, &self.method);
 
-        match limiter {
-            Some(limiter) => match limiter.check_key(&token) {
+        // Check if the limiter exists
+        if let Some(limiter) = limiter {
+            match limiter.check_key(&token) {
                 Ok(()) => {
-                    // limiter len
-                    // println!("limiter len: {:?}", limiter.len());
                     return Ok(());
                 }
-                Err(_) => {
+                Err(_e) => {
                     return Err("RATE_LIMIT_EXCEEDED".into());
                 }
-            },
-            None => {
-                // return error limiter not found
-                let quota =
-                    Quota::with_period(std::time::Duration::from_secs(main_limiter.duration))
-                        .unwrap()
-                        .allow_burst(NonZeroU32::new(main_limiter.max).unwrap());
-                let clock = QuantaClock::default();
-                let keyed: RateLimiter<TokenHash, DashMapStateStore<TokenHash>, QuantaClock> =
-                    RateLimiter::dashmap_with_clock(quota, &clock);
-
-                limiters.insert(limited_path_code, keyed);
-                return Ok(());
             }
-        };
+        } else {
+            // Create a new limiter and insert it into the limiters map
+            let quota = Quota::with_period(std::time::Duration::from_secs(main_limiter.duration))
+                .unwrap()
+                .allow_burst(NonZeroU32::new(main_limiter.max).unwrap());
+            let clock = QuantaClock::default();
+            let keyed: RateLimiter<TokenHash, DashMapStateStore<TokenHash>, QuantaClock> =
+                RateLimiter::dashmap_with_clock(quota, &clock);
+
+            limiters.insert(limited_path_code, keyed);
+            return Ok(());
+        }
     }
 }
 
-// Middleware factory is `Transform` trait
-// `S` - type of the next service
-// `B` - type of response's body
 impl<S, B> Transform<S, ServiceRequest> for RequestLimiter
 where
     S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
@@ -176,7 +166,7 @@ where
 }
 
 pub struct RequestLimiterMiddleware<S> {
-    pub service: S,
+    service: S,
 }
 
 impl<S, B> Service<ServiceRequest> for RequestLimiterMiddleware<S>
@@ -195,7 +185,6 @@ where
         let path: String = req.path().to_string();
         let method = req.method().to_string();
         let code = req.extensions().get::<Value>().cloned();
-        // get ip address
         let ipv4 = req
             .connection_info()
             .realip_remote_addr()

@@ -30,6 +30,7 @@ pub async fn forward(
             .iter()
             .fold(forwarded_req, |fwd_req, (header_name, header_value)| {
                 // remove host header
+                println!("{}: {}", header_name, header_value.to_str().unwrap());
                 if header_name == "host" {
                     return fwd_req;
                 }

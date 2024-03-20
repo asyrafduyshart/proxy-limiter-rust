@@ -31,6 +31,8 @@ pub async fn forward(
     // for (header_name, header_value) in res.headers().iter().filter(|(h, _)| *h != "connection") {
     //     client_resp.append_header((header_name.clone(), header_value.clone()));
     // }
+    // print response
+    println!("{:?}", res);
 
     Ok(client_resp.streaming(res))
 }

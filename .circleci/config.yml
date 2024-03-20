@@ -41,7 +41,7 @@ workflows:
   build-master:
     jobs:
       - build-tags:
-          filters:
+          filters: 
             branches:
               ignore: /.*/
             tags:

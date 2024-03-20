@@ -24,6 +24,14 @@ pub async fn forward(
         None => forwarded_req,
     };
 
+    // add all headers from the original request to the new request
+    let forwarded_req =
+        req.headers()
+            .iter()
+            .fold(forwarded_req, |fwd_req, (header_name, header_value)| {
+                fwd_req.insert_header((header_name.clone(), header_value.clone()))
+            });
+
     let res = forwarded_req
         .send_stream(payload)
         .await

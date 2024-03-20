@@ -1,4 +1,4 @@
-use std::{env, fs::File, io::Read, path::Path, time::Duration};
+use std::{env, fs::File, io::Read, path::Path};
 
 use actix_web::{web, App, HttpServer};
 use awc::Client;

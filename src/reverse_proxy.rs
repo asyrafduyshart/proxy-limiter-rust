@@ -1,4 +1,5 @@
 use actix_web::{error, web, Error, HttpRequest, HttpResponse};
+use log::info;
 use url::Url;
 
 use crate::AppData;
@@ -20,6 +21,8 @@ pub async fn forward(
 
     let forwarded_req = client.request_from(new_url.as_str(), req.head());
 
+    info!("{:?}", forwarded_req);
+
     let res = forwarded_req
         .send_stream(payload)
         .await
@@ -32,7 +35,7 @@ pub async fn forward(
     //     client_resp.append_header((header_name.clone(), header_value.clone()));
     // }
     // print response
-    println!("{:?}", res);
+    info!("{:?}", res);
 
     Ok(client_resp.streaming(res))
 }

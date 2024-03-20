@@ -29,6 +29,10 @@ pub async fn forward(
         req.headers()
             .iter()
             .fold(forwarded_req, |fwd_req, (header_name, header_value)| {
+                // remove host header
+                if header_name == "host" {
+                    return fwd_req;
+                }
                 fwd_req.insert_header((header_name.clone(), header_value.clone()))
             });
 

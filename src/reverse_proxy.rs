@@ -28,5 +28,13 @@ pub async fn forward(
 
     let mut client_resp = HttpResponse::build(res.status());
 
+    for (header_name, header_value) in res
+        .headers()
+        .iter()
+        .filter(|(h, _)| *h != "content-encoding")
+    {
+        client_resp.append_header((header_name.clone(), header_value.clone()));
+    }
+
     Ok(client_resp.streaming(res))
 }

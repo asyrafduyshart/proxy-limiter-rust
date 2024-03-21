@@ -20,3 +20,4 @@ Cargo.toml.orig
 /target
 
 config.json
+.env

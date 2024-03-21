@@ -9,9 +9,9 @@ pub async fn forward(
     app_data: web::Data<AppData>,
 ) -> Result<HttpResponse, Error> {
     let client = app_data.client.clone();
-    let config = app_data.config.clone();
+    let host = app_data.host.clone();
 
-    let mut new_url = match Url::parse(config.proxy.as_str()) {
+    let mut new_url = match Url::parse(&host.as_str()) {
         Ok(url) => url,
         Err(err) => return Err(error::ErrorInternalServerError(err)),
     };

@@ -1,5 +1,4 @@
 use actix_web::{error, web, Error, HttpRequest, HttpResponse};
-use log::info;
 use url::Url;
 
 use crate::AppData;
@@ -21,8 +20,6 @@ pub async fn forward(
 
     let forwarded_req = client.request_from(new_url.as_str(), req.head());
 
-    info!("{:?}", forwarded_req);
-
     let res = forwarded_req
         .send_stream(payload)
         .await
@@ -31,11 +28,9 @@ pub async fn forward(
     let mut client_resp = HttpResponse::build(res.status());
     // Remove `Connection` as per
     // https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Connection#Directives
-    // for (header_name, header_value) in res.headers().iter().filter(|(h, _)| *h != "connection") {
-    //     client_resp.append_header((header_name.clone(), header_value.clone()));
-    // }
-    // print response
-    info!("{:?}", res);
+    for (header_name, header_value) in res.headers().iter().filter(|(h, _)| *h != "connection") {
+        client_resp.append_header((header_name.clone(), header_value.clone()));
+    }
 
     Ok(client_resp.streaming(res))
 }

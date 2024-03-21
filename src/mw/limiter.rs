@@ -1,3 +1,4 @@
+use log::info;
 use route_recognizer::Match;
 
 use std::{
@@ -123,6 +124,7 @@ impl GlobalLimiter {
         // Create a token for rate limiting
         let token = TokenHash::new(&prefix_code, &self.path, &self.method);
 
+        info!("{:?}", token);
         // Check if the limiter exists
         if let Some(limiter) = limiter {
             match limiter.check_key(&token) {
@@ -135,9 +137,7 @@ impl GlobalLimiter {
             }
         } else {
             // Create a new limiter and insert it into the limiters map
-            let quota = Quota::with_period(std::time::Duration::from_secs(main_limiter.duration))
-                .unwrap()
-                .allow_burst(NonZeroU32::new(main_limiter.max).unwrap());
+            let quota = Quota::per_minute(NonZeroU32::new(main_limiter.max).unwrap());
             let clock = QuantaClock::default();
             let keyed: RateLimiter<TokenHash, DashMapStateStore<TokenHash>, QuantaClock> =
                 RateLimiter::dashmap_with_clock(quota, &clock);

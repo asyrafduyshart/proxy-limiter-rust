@@ -1,7 +1,9 @@
+use std::time::Duration;
+
 use actix_web::{error, web, Error, HttpRequest, HttpResponse};
 use url::Url;
 
-use crate::AppData;
+use crate::{domain::config, AppData};
 
 pub async fn forward(
     req: HttpRequest,
@@ -10,6 +12,7 @@ pub async fn forward(
 ) -> Result<HttpResponse, Error> {
     let client = app_data.client.clone();
     let host = app_data.host.clone();
+    let config = config::GLOBAL_CONFIG.get().unwrap();
 
     let mut new_url = match Url::parse(&host.as_str()) {
         Ok(url) => url,
@@ -19,7 +22,9 @@ pub async fn forward(
     new_url.set_path(req.uri().path());
     new_url.set_query(req.uri().query());
 
-    let forwarded_req = client.request_from(new_url.as_str(), req.head());
+    let forwarded_req = client
+        .request_from(new_url.as_str(), req.head())
+        .timeout(Duration::from_secs(config.timeout));
 
     let res = forwarded_req
         .send_stream(payload)

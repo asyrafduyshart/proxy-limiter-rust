@@ -31,6 +31,7 @@ impl Config {
                         limiter.max,
                         limiter.duration,
                         limiter.jwt_validation.clone(),
+                        limiter.disabled,
                     ),
                 );
             }
@@ -50,6 +51,8 @@ pub struct Limiter {
     pub max: u32,
     pub duration: u64,
     pub jwt_validation: JwtValidation,
+    #[serde(default)]
+    pub disabled: bool,
 }
 
 fn default_code() -> String {
@@ -61,6 +64,7 @@ impl Limiter {
         max: u32,
         duration: u64,
         jwt_validation: JwtValidation,
+        disabled: bool,
     ) -> Self {
         Limiter {
             // set code to global from
@@ -68,6 +72,7 @@ impl Limiter {
             max,
             duration,
             jwt_validation,
+            disabled,
         }
     }
 }

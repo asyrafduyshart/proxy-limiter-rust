@@ -87,9 +87,21 @@ impl GlobalLimiter {
         // Get the global configuration
         let config = domain::config::GLOBAL_CONFIG.get().unwrap();
         // Get the route limiters
-        let routes = ROUTE_LIMITER.get().unwrap();
+        let routes = match ROUTE_LIMITER.get() {
+            Some(routes) => routes,
+            None => {
+                eprintln!("ROUTE_LIMITER_NOT_FOUND");
+                return Err("ROUTE_LIMITER_NOT_FOUND".into());
+            }
+        };
         // Lock the limiters
-        let mut limiters = limiters.lock().unwrap();
+        let mut limiters = match limiters.lock() {
+            Ok(lock) => lock,
+            Err(_) => {
+                eprintln!("RATE_LIMITER_LOCK_ERROR");
+                return Err("RATE_LIMITER_LOCK_ERROR".into());
+            }
+        };
 
         // Find the limiter for the given route
         let route_finder: Result<Match<&HashMap<String, Limiter>>, _> =
@@ -104,6 +116,9 @@ impl GlobalLimiter {
         if let Ok(res) = route_finder {
             let data: &HashMap<String, Limiter> = res.handler();
             if let Some(limiter) = data.get(&self.method) {
+                if limiter.disabled {
+                    return Ok(());
+                }
                 main_limiter = limiter.clone();
                 limited_path_code = limiter.code.clone();
             }
@@ -127,6 +142,7 @@ impl GlobalLimiter {
         info!("{:?}", token);
         // Check if the limiter exists
         if let Some(limiter) = limiter {
+            // print limiter
             match limiter.check_key(&token) {
                 Ok(()) => {
                     return Ok(());

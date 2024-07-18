@@ -22,14 +22,17 @@ pub async fn forward(
     new_url.set_path(req.uri().path());
     new_url.set_query(req.uri().query());
 
-    let forwarded_req = client
+    let forwarded_req: awc::ClientRequest = client
         .request_from(new_url.as_str(), req.head())
         .timeout(Duration::from_secs(config.timeout));
 
-    let res = forwarded_req
-        .send_stream(payload)
-        .await
-        .map_err(error::ErrorInternalServerError)?;
+    let res = match forwarded_req.send_stream(payload).await {
+        Ok(res) => res,
+        Err(err) => {
+            log::error!("Error forwarding request: {:?}", err);
+            return Err(error::ErrorInternalServerError(err));
+        }
+    };
 
     let mut client_resp = HttpResponse::build(res.status());
 
